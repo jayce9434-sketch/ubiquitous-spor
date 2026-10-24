@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<title>Ring Duplication: CHAOS MODE</title>
+<style>
+  :root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;-webkit-user-select:none;user-select:none;touch-action:none}
+  html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#070b12;color:#f8fbff}
+  body{display:grid;place-items:center}
+  canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+  .hud{position:fixed;left:18px;top:calc(16px + env(safe-area-inset-top));z-index:3;pointer-events:none}
+  .count{font-weight:900;font-size:clamp(24px,5vw,52px);line-height:.95;letter-spacing:-.04em;text-shadow:0 4px 24px #000}
+  .label{margin-top:8px;font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.55;font-weight:800}
+  .rate{margin-top:8px;font-size:14px;opacity:.8;font-weight:750}
+  .panel{position:fixed;right:14px;top:calc(14px + env(safe-area-inset-top));z-index:4;width:min(290px,calc(100vw - 28px));background:rgba(10,15,25,.82);border:1px solid rgba(255,255,255,.10);border-radius:18px;padding:14px;backdrop-filter:blur(16px);box-shadow:0 16px 55px rgba(0,0,0,.35);transition:.22s transform,.22s opacity}
+  .panel.hidden{transform:translateX(calc(100% + 28px));opacity:.15}
+  .panel h2{font-size:14px;margin:0 0 10px;letter-spacing:.12em;text-transform:uppercase}
+  .row{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;margin:10px 0}
+  .row label{font-size:12px;font-weight:750;opacity:.78}
+  .row output{font-size:12px;opacity:.58;min-width:48px;text-align:right}
+  input[type=range]{width:100%;grid-column:1/-1;accent-color:#66b7ff}
+  .buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+  button{border:1px solid rgba(255,255,255,.11);background:rgba(255,255,255,.07);color:#fff;border-radius:12px;padding:10px 12px;font:800 12px/1 inherit;cursor:pointer}
+  button:active{transform:scale(.97)}
+  .toggle{position:fixed;right:14px;bottom:calc(14px + env(safe-area-inset-bottom));z-index:5;width:48px;height:48px;border-radius:50%;font-size:19px;background:rgba(10,15,25,.84);backdrop-filter:blur(12px)}
+  .hint{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:2;font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.42;text-align:center;white-space:nowrap;pointer-events:none}
+  @media(max-width:650px){.panel{top:auto;bottom:calc(76px + env(safe-area-inset-bottom));right:12px}.hint{display:none}}
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Bouncing ball duplication simulation"></canvas>
+<div class="hud">
+  <div class="count" id="ballCount">1 BALL</div>
+  <div class="label">No artificial limit ☠️</div>
+  <div class="rate" id="rateText">0.0 hoop passes / sec</div>
+</div>
+
+<section class="panel" id="panel">
+  <h2>Simulation</h2>
+  <div class="row"><label for="speed">Ball speed</label><output id="speedOut">330</output><input id="speed" type="range" min="80" max="850" value="330" step="10"></div>
+  <div class="row"><label for="gravity">Gravity</label><output id="gravityOut">80</output><input id="gravity" type="range" min="0" max="900" value="80" step="10"></div>
+  <div class="row"><label for="bounce">Bounce</label><output id="bounceOut">100%</output><input id="bounce" type="range" min="85" max="104" value="100" step="1"></div>
+  <div class="row"><label for="ballSize">Ball size</label><output id="ballSizeOut">8</output><input id="ballSize" type="range" min="3" max="18" value="8" step="1"></div>
+  <div class="row"><label for="hoopSize">Hoop width</label><output id="hoopSizeOut">72</output><input id="hoopSize" type="range" min="36" max="150" value="72" step="2"></div>
+  <div class="row"><label for="hoopAngle">Hoop angle</label><output id="hoopAngleOut">25°</output><input id="hoopAngle" type="range" min="0" max="359" value="25" step="1"></div>
+  <div class="row"><label for="volume">Sound volume</label><output id="volumeOut">65%</output><input id="volume" type="range" min="0" max="100" value="65" step="1"></div>
+  <div class="buttons"><button id="addBall">+ Ball</button><button id="reset">Reset</button></div>
+</section>
+<button class="toggle" id="panelToggle" aria-label="Toggle settings">⚙</button>
+<div class="hint">Tap inside ring to add a ball • R = reset • Space = add ball</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const ballCountEl = document.getElementById('ballCount');
+  const rateText = document.getElementById('rateText');
+  const panel = document.getElementById('panel');
+
+  const ui = {
+    speed: document.getElementById('speed'),
+    gravity: document.getElementById('gravity'),
+    bounce: document.getElementById('bounce'),
+    ballSize: document.getElementById('ballSize'),
+    hoopSize: document.getElementById('hoopSize'),
+    hoopAngle: document.getElementById('hoopAngle'),
+    volume: document.getElementById('volume'),
+  };
+  const out = {
+    speed: document.getElementById('speedOut'),
+    gravity: document.getElementById('gravityOut'),
+    bounce: document.getElementById('bounceOut'),
+    ballSize: document.getElementById('ballSizeOut'),
+    hoopSize: document.getElementById('hoopSizeOut'),
+    hoopAngle: document.getElementById('hoopAngleOut'),
+    volume: document.getElementById('volumeOut'),
+  };
+
+  let W = 1, H = 1, dpr = 1;
+  let cx = 0, cy = 0, ringR = 200;
+  let hoop = null;
+  let balls = [];
+  let lastTime = performance.now();
+  let passes = 0;
+  let passTimes = [];
+  let renderStride = 1;
+
+  // Self-contained WebAudio SFX: no external files.
+  // CHAOS MODE: every individual collision/pass gets its own voice. No event throttling.
+  // A final limiter only catches dangerous clipping peaks; it does NOT reduce event count.
+  const audio = (() => {
+    let ac = null, master = null, limiter = null, noise = null, unlocked = false;
+
+    function ensure(){
+      if(!ac){
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if(!AC) return false;
+        ac = new AC({latencyHint:'interactive'});
+
+        master = ac.createGain();
+        master.gain.value = (+ui.volume.value/100) * .62;
+
+        // Peak safety only. Thousands of events still layer simultaneously.
+        limiter = ac.createDynamicsCompressor();
+        limiter.threshold.value = -2;
+        limiter.knee.value = 0;
+        limiter.ratio.value = 20;
+        limiter.attack.value = .001;
+        limiter.release.value = .035;
+        master.connect(limiter);
+        limiter.connect(ac.destination);
+
+        const len = Math.max(1, Math.floor(ac.sampleRate * .13));
+        noise = ac.createBuffer(1, len, ac.sampleRate);
+        const d = noise.getChannelData(0);
+        for(let i=0;i<len;i++){
+          const env = Math.pow(1-i/len, 2.35);
+          d[i] = (Math.random()*2-1) * env;
+        }
+      }
+      if(ac.state === 'suspended') ac.resume();
+      unlocked = true;
+      return true;
+    }
+
+    function setVolume(v){
+      if(!ensure()) return;
+      const now=ac.currentTime;
+      master.gain.cancelScheduledValues(now);
+      master.gain.setTargetAtTime((v/100)*.62, now, .01);
+    }
+
+    function bounce(energy=1, xNorm=0){
+      if(!unlocked || !ac) return;
+      const now = ac.currentTime;
+      const strength = Math.max(.08, Math.min(1.25, energy));
+      const pan = Math.max(-.92, Math.min(.92, xNorm + (Math.random()-.5)*.18));
+
+      // Clicky/rubbery contact
+      const src=ac.createBufferSource(); src.buffer=noise;
+      const hp=ac.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=520+Math.random()*900;
+      const bp=ac.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1200+Math.random()*2100; bp.Q.value=.55+Math.random()*.8;
+      const g=ac.createGain();
+      g.gain.setValueAtTime(.0001,now);
+      g.gain.exponentialRampToValueAtTime(.018+.052*strength,now+.0015);
+      g.gain.exponentialRampToValueAtTime(.0001,now+.032+Math.random()*.018);
+      const panner=ac.createStereoPanner ? ac.createStereoPanner() : null;
+      if(panner) panner.pan.value=pan;
+      src.connect(hp); hp.connect(bp); bp.connect(g);
+      if(panner){g.connect(panner);panner.connect(master)} else g.connect(master);
+      src.playbackRate.value=.88+Math.random()*.3;
+      src.start(now); src.stop(now+.06);
+
+      // Body thump. Every bounce gets one, so huge counts become intentionally ridiculous.
+      const osc=ac.createOscillator(); osc.type='sine';
+      const base=105+Math.random()*90;
+      osc.frequency.setValueAtTime(base,now);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(42,base*.48),now+.055);
+      const og=ac.createGain();
+      og.gain.setValueAtTime(.0001,now);
+      og.gain.exponentialRampToValueAtTime(.014+.04*strength,now+.001);
+      og.gain.exponentialRampToValueAtTime(.0001,now+.065);
+      osc.connect(og);
+      if(panner){
+        const p2=ac.createStereoPanner(); p2.pan.value=pan*.72; og.connect(p2); p2.connect(master);
+      } else og.connect(master);
+      osc.start(now); osc.stop(now+.075);
+    }
+
+    function hoop(xNorm=0){
+      if(!unlocked || !ac) return;
+      const now = ac.currentTime;
+      const pan=Math.max(-.9,Math.min(.9,xNorm));
+
+      // Airy pass / whoosh
+      const src=ac.createBufferSource(); src.buffer=noise;
+      const bp=ac.createBiquadFilter(); bp.type='bandpass';
+      bp.frequency.setValueAtTime(600+Math.random()*220,now);
+      bp.frequency.exponentialRampToValueAtTime(2500+Math.random()*1000,now+.105);
+      bp.Q.value=.5;
+      const ng=ac.createGain();
+      ng.gain.setValueAtTime(.0001,now);
+      ng.gain.exponentialRampToValueAtTime(.048,now+.012);
+      ng.gain.exponentialRampToValueAtTime(.0001,now+.13);
+      const np=ac.createStereoPanner ? ac.createStereoPanner() : null;
+      if(np) np.pan.value=pan;
+      src.connect(bp);bp.connect(ng); if(np){ng.connect(np);np.connect(master)}else ng.connect(master);
+      src.start(now);src.stop(now+.14);
+
+      // Bright duplication chord. EACH PASS gets a complete chord.
+      const root=480+Math.random()*95;
+      [1,1.26,1.5,2.01].forEach((mul,i)=>{
+        const o=ac.createOscillator(); o.type=i<2?'sine':'triangle';
+        o.frequency.setValueAtTime(root*mul,now);
+        o.detune.value=(Math.random()-.5)*12;
+        const g=ac.createGain();
+        const peak=i===0?.064:.026;
+        g.gain.setValueAtTime(.0001,now);
+        g.gain.exponentialRampToValueAtTime(peak,now+.002+i*.002);
+        g.gain.exponentialRampToValueAtTime(.0001,now+.15+i*.028);
+        const pp=ac.createStereoPanner ? ac.createStereoPanner() : null;
+        if(pp) pp.pan.value=Math.max(-1,Math.min(1,pan+(Math.random()-.5)*.25));
+        o.connect(g); if(pp){g.connect(pp);pp.connect(master)}else g.connect(master);
+        o.start(now);o.stop(now+.28);
+      });
+    }
+
+    function unlock(){ ensure(); }
+    return {unlock,setVolume,bounce,hoop};
+  })();
+
+  function settings(){
+    return {
+      speed: +ui.speed.value,
+      gravity: +ui.gravity.value,
+      restitution: +ui.bounce.value / 100,
+      ballR: +ui.ballSize.value,
+      hoopW: +ui.hoopSize.value,
+      hoopA: +ui.hoopAngle.value * Math.PI / 180,
+    };
+  }
+
+  function resize(){
+    W = innerWidth; H = innerHeight;
+    dpr = Math.min(devicePixelRatio || 1, 2);
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    cx = W * .5;
+    cy = H * .52;
+    ringR = Math.max(95, Math.min(W, H) * .34);
+    constrainAll();
+  }
+
+  function randomVelocity(speed){
+    const a = Math.random() * Math.PI * 2;
+    return {vx:Math.cos(a)*speed, vy:Math.sin(a)*speed};
+  }
+
+  function addBall(x=cx, y=cy, inherited=null){
+    const s = settings();
+    let vx, vy;
+    if(inherited){
+      const jitter = (Math.random()-.5)*.24;
+      const c=Math.cos(jitter), si=Math.sin(jitter);
+      vx=inherited.vx*c-inherited.vy*si;
+      vy=inherited.vx*si+inherited.vy*c;
+    } else {
+      ({vx,vy}=randomVelocity(s.speed));
+    }
+    balls.push({x,y,vx,vy,prevX:x,prevY:y,hoopCooldown:0,hue:195+Math.random()*25});
+  }
+
+  function reset(){
+    balls.length = 0;
+    passTimes.length = 0;
+    passes = 0;
+    addBall(cx,cy);
+    updateHud();
+  }
+
+  function constrainAll(){
+    const r = settings().ballR;
+    const maxD = Math.max(1, ringR-r-2);
+    for(const b of balls){
+      const dx=b.x-cx, dy=b.y-cy, d=Math.hypot(dx,dy);
+      if(d>maxD){b.x=cx+dx/d*maxD;b.y=cy+dy/d*maxD;}
+    }
+  }
+
+  function computeHoop(s){
+    const a=s.hoopA;
+    const nx=Math.cos(a), ny=Math.sin(a);
+    const tx=-ny, ty=nx;
+    const centerDist=ringR;
+    const hx=cx+nx*centerDist, hy=cy+ny*centerDist;
+    return {a,nx,ny,tx,ty,hx,hy,half:s.hoopW*.5};
+  }
+
+  function crossingThroughHoop(b,h,s){
+    if(b.hoopCooldown>0) return false;
+
+    const px=b.prevX-h.hx, py=b.prevY-h.hy;
+    const qx=b.x-h.hx, qy=b.y-h.hy;
+    const prevN=px*h.nx+py*h.ny;
+    const currN=qx*h.nx+qy*h.ny;
+    if(prevN===currN || prevN*currN>0) return false;
+
+    const t=prevN/(prevN-currN);
+    if(t<0 || t>1) return false;
+    const ix=b.prevX+(b.x-b.prevX)*t;
+    const iy=b.prevY+(b.y-b.prevY)*t;
+    const tangent=(ix-h.hx)*h.tx+(iy-h.hy)*h.ty;
+    const clearHalf=Math.max(5,h.half-s.ballR*1.15);
+    if(Math.abs(tangent)>clearHalf) return false;
+
+    b.hoopCooldown=.18;
+    return true;
+  }
+
+  function resolveBallCollisions(count,s){
+    if(count<2) return;
+    const diameter=s.ballR*2;
+    const diameterSq=diameter*diameter;
+    // Spatial hash broadphase: only nearby balls are compared, so this scales
+    // far better than checking every ball against every other ball.
+    const cellSize=Math.max(diameter*1.15,6);
+    const grid=new Map();
+
+    for(let i=0;i<count;i++){
+      const b=balls[i];
+      const gx=Math.floor(b.x/cellSize), gy=Math.floor(b.y/cellSize);
+      const key=gx+','+gy;
+      let bucket=grid.get(key);
+      if(bucket) bucket.push(i); else grid.set(key,[i]);
+    }
+
+    const neighborOffsets=[[0,0],[1,0],[-1,1],[0,1],[1,1]];
+    for(const [key,bucket] of grid){
+      const comma=key.indexOf(',');
+      const gx=+key.slice(0,comma), gy=+key.slice(comma+1);
+      for(const [ox,oy] of neighborOffsets){
+        const other=grid.get((gx+ox)+','+(gy+oy));
+        if(!other) continue;
+        for(let ai=0;ai<bucket.length;ai++){
+          const i=bucket[ai], a=balls[i];
+          const start=(ox===0&&oy===0)?ai+1:0;
+          for(let bj=start;bj<other.length;bj++){
+            const j=other[bj];
+            if(i===j) continue;
+            const b=balls[j];
+            let dx=b.x-a.x, dy=b.y-a.y;
+            let d2=dx*dx+dy*dy;
+            if(d2>=diameterSq) continue;
+
+            let dist=Math.sqrt(d2);
+            let nx,ny;
+            if(dist<.0001){
+              const angle=((i*12.9898+j*78.233)%6.28318530718);
+              nx=Math.cos(angle);ny=Math.sin(angle);dist=.0001;
+            } else {nx=dx/dist;ny=dy/dist;}
+
+            // Split overlap evenly so clusters do not fuse into one blob.
+            const overlap=diameter-dist;
+            const correction=(overlap*.5)+.01;
+            a.x-=nx*correction;a.y-=ny*correction;
+            b.x+=nx*correction;b.y+=ny*correction;
+
+            // Equal-mass impulse along the collision normal. Tangential speed is preserved.
+            const rvx=b.vx-a.vx, rvy=b.vy-a.vy;
+            const relNormal=rvx*nx+rvy*ny;
+            if(relNormal<0){
+              const impulse=-(1+s.restitution)*relNormal*.5;
+              a.vx-=impulse*nx;a.vy-=impulse*ny;
+              b.vx+=impulse*nx;b.vy+=impulse*ny;
+              const energy=Math.min(1.25,Math.abs(relNormal)/210);
+              const xNorm=((a.x+b.x)*.5-cx)/Math.max(1,ringR);
+              audio.bounce(Math.max(.08,energy),xNorm);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function step(dt){
+    const s=settings();
+    hoop=computeHoop(s);
+    const boundary=ringR-s.ballR;
+    const spawned=[];
+
+    // Semi-fixed substeps keep fast balls from tunneling through the hoop/ring.
+    const maxSpeed = s.speed + Math.abs(s.gravity)*.3;
+    const substeps = Math.max(1, Math.min(8, Math.ceil((maxSpeed*dt)/(Math.max(5,s.ballR*1.3)))));
+    const hdt=dt/substeps;
+
+    for(let sub=0;sub<substeps;sub++){
+      const startLength=balls.length;
+      for(let i=0;i<startLength;i++){
+        const b=balls[i];
+        b.prevX=b.x;b.prevY=b.y;
+        b.hoopCooldown=Math.max(0,b.hoopCooldown-hdt);
+        b.vy+=s.gravity*hdt;
+        b.x+=b.vx*hdt;
+        b.y+=b.vy*hdt;
+
+        // Ring collision. Skip the small hoop opening so balls can truly pass through the ring there.
+        let dx=b.x-cx, dy=b.y-cy;
+        let dist=Math.hypot(dx,dy)||.0001;
+        if(dist>boundary){
+          const rx=b.x-hoop.hx, ry=b.y-hoop.hy;
+          const tangent=rx*hoop.tx+ry*hoop.ty;
+          const normal=rx*hoop.nx+ry*hoop.ny;
+          const inOpening=Math.abs(tangent)<Math.max(4,hoop.half-s.ballR*1.05) && Math.abs(normal)<s.ballR*3.3;
+
+          if(!inOpening){
+            const impactEnergy = Math.min(1.25, Math.abs((b.vx*(dx/dist)) + (b.vy*(dy/dist))) / 170);
+            audio.bounce(impactEnergy, (b.x-cx)/Math.max(1,ringR));
+            const nx=dx/dist, ny=dy/dist;
+            b.x=cx+nx*boundary;
+            b.y=cy+ny*boundary;
+            const vn=b.vx*nx+b.vy*ny;
+            if(vn>0){
+              b.vx-=(1+s.restitution)*vn*nx;
+              b.vy-=(1+s.restitution)*vn*ny;
+            }
+            // Normalize close to selected speed so the sim stays lively.
+            const mag=Math.hypot(b.vx,b.vy)||1;
+            const target=Math.max(25,s.speed);
+            const blend=.035;
+            const nm=mag+(target-mag)*blend;
+            b.vx=b.vx/mag*nm;b.vy=b.vy/mag*nm;
+          }
+        }
+
+        if(crossingThroughHoop(b,hoop,s)){
+          spawned.push({x:b.x,y:b.y,vx:b.vx,vy:b.vy});
+          passes++;
+          audio.hoop((b.x-cx)/Math.max(1,ringR));
+          passTimes.push(performance.now());
+        }
+
+        // If a ball exits through the opening, wrap it just inside opposite side.
+        dx=b.x-cx;dy=b.y-cy;dist=Math.hypot(dx,dy)||1;
+        if(dist>ringR+s.ballR*5){
+          const nx=dx/dist, ny=dy/dist;
+          b.x=cx-nx*(ringR-s.ballR*2);
+          b.y=cy-ny*(ringR-s.ballR*2);
+          b.prevX=b.x;b.prevY=b.y;
+        }
+      }
+
+      // Ball-vs-ball collisions happen after movement for this substep.
+      resolveBallCollisions(startLength,s);
+    }
+
+    for(const p of spawned) addBall(p.x,p.y,p);
+    renderStride = balls.length>12000?4:balls.length>7000?3:balls.length>3500?2:1;
+  }
+
+  function draw(){
+    const s=settings();
+    ctx.fillStyle='#070b12';ctx.fillRect(0,0,W,H);
+
+    // subtle glow
+    const glow=ctx.createRadialGradient(cx,cy,ringR*.15,cx,cy,ringR*1.2);
+    glow.addColorStop(0,'#101a2b');glow.addColorStop(1,'#070b12');
+    ctx.fillStyle=glow;ctx.beginPath();ctx.arc(cx,cy,ringR*1.15,0,Math.PI*2);ctx.fill();
+
+    hoop=computeHoop(s);
+    const gapAngle=Math.asin(Math.min(.98,hoop.half/ringR));
+    ctx.lineWidth=3;ctx.strokeStyle='rgba(234,245,255,.92)';ctx.shadowBlur=12;ctx.shadowColor='rgba(120,200,255,.22)';
+    ctx.beginPath();ctx.arc(cx,cy,ringR,hoop.a+gapAngle,hoop.a-gapAngle+Math.PI*2);ctx.stroke();
+    ctx.shadowBlur=0;
+
+    // Hoop rails attached across the ring opening.
+    const depth=24;
+    const ix=hoop.hx-hoop.nx*depth*.55, iy=hoop.hy-hoop.ny*depth*.55;
+    ctx.lineWidth=5;ctx.lineCap='round';ctx.strokeStyle='#ffd45c';
+    ctx.beginPath();
+    ctx.moveTo(ix+hoop.tx*hoop.half,iy+hoop.ty*hoop.half);
+    ctx.lineTo(hoop.hx+hoop.nx*depth+hoop.tx*hoop.half,hoop.hy+hoop.ny*depth+hoop.ty*hoop.half);
+    ctx.moveTo(ix-hoop.tx*hoop.half,iy-hoop.ty*hoop.half);
+    ctx.lineTo(hoop.hx+hoop.nx*depth-hoop.tx*hoop.half,hoop.hy+hoop.ny*depth-hoop.ty*hoop.half);
+    ctx.stroke();
+    ctx.lineWidth=2;ctx.strokeStyle='rgba(255,212,92,.35)';
+    ctx.beginPath();ctx.moveTo(ix+hoop.tx*hoop.half,iy+hoop.ty*hoop.half);ctx.lineTo(ix-hoop.tx*hoop.half,iy-hoop.ty*hoop.half);ctx.stroke();
+
+    const r=s.ballR;
+    ctx.shadowBlur=0;
+    for(let i=0;i<balls.length;i+=renderStride){
+      const b=balls[i];
+      ctx.fillStyle=`hsl(${b.hue} 95% 62%)`;
+      ctx.beginPath();ctx.arc(b.x,b.y,r,0,Math.PI*2);ctx.fill();
+      if(balls.length<1800){
+        ctx.fillStyle='rgba(255,255,255,.72)';
+        ctx.beginPath();ctx.arc(b.x-r*.28,b.y-r*.32,Math.max(1,r*.23),0,Math.PI*2);ctx.fill();
+      }
+    }
+
+    if(renderStride>1){
+      ctx.fillStyle='rgba(255,255,255,.42)';ctx.font='700 11px system-ui';ctx.textAlign='center';
+      ctx.fillText(`visual sampling ${renderStride}× • physics still runs for every ball`,cx,Math.min(H-22,cy+ringR+34));
+    }
+  }
+
+  function updateHud(){
+    const n=balls.length;
+    ballCountEl.textContent=n.toLocaleString()+ (n===1?' BALL':' BALLS');
+    const now=performance.now();
+    while(passTimes.length && passTimes[0]<now-5000) passTimes.shift();
+    const rate=passTimes.length/5;
+    rateText.textContent=rate.toFixed(1)+' hoop passes / sec';
+  }
+
+  function frame(now){
+    let dt=Math.min(.035,(now-lastTime)/1000||.016);lastTime=now;
+    step(dt);
+    draw();updateHud();requestAnimationFrame(frame);
+  }
+
+  for(const [k,input] of Object.entries(ui)){
+    const format=()=>{
+      if(k==='bounce' || k==='volume') out[k].value=input.value+'%';
+      else if(k==='hoopAngle') out[k].value=input.value+'°';
+      else out[k].value=input.value;
+    };
+    input.addEventListener('input',()=>{
+      format();
+      if(k==='ballSize')constrainAll();
+      if(k==='volume') audio.setVolume(+input.value);
+    });
+    format();
+  }
+
+  document.getElementById('addBall').addEventListener('click',()=>{audio.unlock();addBall();});
+  document.getElementById('reset').addEventListener('click',()=>{audio.unlock();reset();});
+  document.getElementById('panelToggle').addEventListener('click',()=>{audio.unlock();panel.classList.toggle('hidden')});
+
+  canvas.addEventListener('pointerdown',(e)=>{
+    audio.unlock();
+    if(e.button!==0 && e.pointerType==='mouse') return;
+    const dx=e.clientX-cx,dy=e.clientY-cy;
+    if(Math.hypot(dx,dy)<ringR-settings().ballR*2) addBall(e.clientX,e.clientY);
+  },{passive:true});
+
+  addEventListener('keydown',(e)=>{
+    audio.unlock();
+    if(e.code==='Space'){e.preventDefault();addBall();}
+    else if(e.key.toLowerCase()==='r') reset();
+  });
+  addEventListener('resize',resize,{passive:true});
+  addEventListener('contextmenu',e=>e.preventDefault());
+  addEventListener('gesturestart',e=>e.preventDefault(),{passive:false});
+
+  resize();reset();requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
